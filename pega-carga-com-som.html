@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Pega-Carga</title>
+<style>
+  /* página escura e jogo centralizado */
+  html, body { margin: 0; height: 100%; background: #0d1526; }
+  body { display: flex; justify-content: center; align-items: center; touch-action: none; user-select: none; -webkit-user-select: none; }
+  /* o canvas se ajusta à largura e à altura da tela */
+  canvas { width: min(100vw, 66.6vh); height: auto; image-rendering: pixelated; display: block; }
+</style>
+</head>
+<body>
+<canvas id="tela" width="400" height="600"></canvas>
+<script>
+// ===== Configuração básica =====
+const tela = document.getElementById('tela');
+const ctx = tela.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+const L = 400, A = 600;          // largura e altura do jogo
+const CHAO = 540;                // altura do chão
+
+// ===== Cores do Rafa =====
+const LARANJA = '#ff7a00', LIMAO = '#c8f03c', MARINHO = '#1b2a4a';
+// K contorno, H cabelo, S pele, D sombra da pele, W branco, B/b camiseta azul, Y estampa limão, O detalhe laranja, N calça, G tênis
+const PALETA = {"K": "#1a1a1a", "H": "#16110e", "S": "#9a6440", "D": "#74472b", "W": "#ffffff", "B": "#2563d9", "b": "#1a47a8", "Y": "#c8f03c", "O": "#ff7a00", "N": "#1b2a4a", "G": "#e6e6e6"};
+
+// ===== Rafa em pixel art 32x32 (cada letra é um pixel, "." é vazio) =====
+// cabeça do menino: cabelo curto e sorriso grande
+const CABECA_MENINO = [
+  '................................',
+  '............KKKKKKKK............',
+  '..........KKHHHHHHHHKK..........',
+  '.........KHHHHHHHHHHHHK.........',
+  '.........KHHHHHHHHHHHHK.........',
+  '........KHHSSSSSSSSSSHHK........',
+  '........KHSSSSSSSSSSSSHK........',
+  '........KSSSHHSSSSHHSSSK........',
+  '.......KDSSKWKSSSSKWKSSDK.......',
+  '.......KDSSSSSSSSSSSSSSDK.......',
+  '........KSSSSSSDDSSSSSSK........',
+  '........KSSSKWWWWWWKSSSK........',
+  '........KSSSSKKKKKKSSSSK........',
+  '.........KSSSSSSSSSSSSK.........',
+  '..........KKDSSSSSSDKK..........',
+  '............KDSSSSDK............',
+];
+// cabeça da menina: cabelo comprido até os ombros e presilha laranja
+const CABECA_MENINA = [
+  '................................',
+  '............KKKKKKKK............',
+  '..........KKHHHHHHHHKK..........',
+  '.........KHHHHHHHHHHOOK.........',
+  '........KHHHHHHHHHHHOOHK........',
+  '........KHHHSSSSSSSSHHHK........',
+  '.......KHHSSSSSSSSSSSSHHK.......',
+  '.......KHSSSHHSSSSHHSSSHK.......',
+  '.......KHSSKWKSSSSKWKSSHK.......',
+  '.......KHSSSSSSSSSSSSSSHK.......',
+  '.......KHSSSSSSDDSSSSSSHK.......',
+  '.......KHSSSKWWWWWWKSSSHK.......',
+  '.......KHSSSSKKKKKKSSSSHK.......',
+  '.......KHHSSSSSSSSSSSSHHK.......',
+  '.......KHHHKKDSSSSDKKHHHK.......',
+  '.......KHHHHKDSSSSDKHHHHK.......',
+];
+// corpo: camiseta azul com estampa (igual para os dois)
+const CORPO = [
+  '........KKKKBBKSSKBBKKKK........',
+  '.......KBBBBBBBKKBBBBBBBK.......',
+  '......KBBBBBBBBBBBBBBBBBBK......',
+  '......KBBBBYYYYYYYYOBBBBBK......',
+  '......KSKBBYYYYYYYYYBBBKSK......',
+  '......KSKBBBBYYYYYYBBBBKSK......',
+  '......KSKBBBBBBBBBBBBBBKSK......',
+  '......KKKbbbbbbbbbbbbbbKKK......',
+  '.........KNNNNNNNNNNNNK.........',
+];
+// quadro 1: pernas abertas
+const PERNAS_1 = [
+  '........KNNNNNK..KNNNNNK........',
+  '........KNNNNK....KNNNNK........',
+  '.......KNNNNK......KNNNNK.......',
+  '.......KNNNNK......KNNNNK.......',
+  '......KGGGGGK......KGGGGGK......',
+  '......KKKKKKK......KKKKKKK......',
+  '................................',
+];
+// quadro 2: pernas juntas
+const PERNAS_2 = [
+  '.........KNNNNNNNNNNNNK.........',
+  '..........KNNNNNNNNNNK..........',
+  '..........KNNNNKNNNNNK..........',
+  '..........KNNNNKKNNNNK..........',
+  '.........KGGGGGKKGGGGGK.........',
+  '.........KKKKKKKKKKKKKK.........',
+  '................................',
+];
+// monta os 2 quadros de andar para cada gênero
+const QUADROS = {
+  menino: [CABECA_MENINO.concat(CORPO, PERNAS_1), CABECA_MENINO.concat(CORPO, PERNAS_2)],
+  menina: [CABECA_MENINA.concat(CORPO, PERNAS_1), CABECA_MENINA.concat(CORPO, PERNAS_2)],
+};
+
+// ===== Tons de pele que o jogador pode escolher (cor e sombra) =====
+const PELES = [
+  { S: '#f1c9a5', D: '#d9a77f' },
+  { S: '#d8a36f', D: '#b98250' },
+  { S: '#9a6440', D: '#74472b' },
+  { S: '#6b4226', D: '#4e2e19' },
+  { S: '#4a2c1a', D: '#2f1c10' },
+];
+// escolha feita na tela inicial
+const escolha = { genero: 'menino', pele: 2 };
+
+// desenha o personagem: x,y = canto de cima à esquerda; cada pixel vira tam x tam
+function desenharPersonagem(x, y, tam = 2) {
+  const desenho = QUADROS[escolha.genero][rafa.quadro];
+  const cores = Object.assign({}, PALETA, PELES[escolha.pele]);   // troca a cor da pele
+  ctx.save();
+  if (rafa.olhandoEsquerda) {        // vira o desenho quando anda para a esquerda
+    ctx.translate(x + 32 * tam, y);
+    ctx.scale(-1, 1);
+    x = 0; y = 0;
+  }
+  for (let lin = 0; lin < desenho.length; lin++) {
+    for (let col = 0; col < desenho[lin].length; col++) {
+      const cor = cores[desenho[lin][col]];
+      if (cor) { ctx.fillStyle = cor; ctx.fillRect(x + col * tam, y + lin * tam, tam, tam); }
+    }
+  }
+  ctx.restore();
+}
+
+// ===== Estado do jogo =====
+let estado = 'inicio';   // inicio, jogando, fim
+let pontos, vidas, cargas, tempoNovaCarga, velocidade, tremor, avisos;
+const rafa = { x: 168, y: CHAO - 62, vel: 5, quadro: 0, passo: 0, olhandoEsquerda: false, piscar: 0 };
+const teclas = {};
+
+function recomecar() {
+  pontos = 0; vidas = 3; cargas = []; tempoNovaCarga = 0;
+  velocidade = 2; tremor = 0; avisos = [];
+  rafa.x = 168; rafa.piscar = 0;
+  estado = 'jogando';
+  tocar('clique');
+}
+
+// ===== Sons e música (criados pelo código, não usa arquivos de áudio) =====
+let audio = null, mestre = null;      // "audio" é o motor de som do navegador; "mestre" é o volume geral
+let somLigado = true;
+try { if (localStorage.getItem('pegaCargaSom') === 'off') somLigado = false; } catch (e) {}
+const BOTAO_SOM = { x: 178, y: 3, l: 44, a: 28 };   // botão de ligar/desligar o som (no topo)
+
+// o celular só deixa tocar som depois de um toque do jogador, por isso iniciamos aqui
+function iniciarAudio() {
+  if (!audio) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audio = new AC();
+    mestre = audio.createGain();
+    mestre.gain.value = somLigado ? 1 : 0;
+    mestre.connect(audio.destination);
+  }
+  if (audio.state === 'suspended') audio.resume();
+}
+
+function alternarSom() {
+  somLigado = !somLigado;
+  if (mestre) mestre.gain.value = somLigado ? 1 : 0;
+  try { localStorage.setItem('pegaCargaSom', somLigado ? 'on' : 'off'); } catch (e) {}
+}
+
+// toca uma nota: freq = tom, quando = momento, dur = duração, tipo = timbre, vol = volume
+// se freqFim for informada, o tom desliza até ela (bom para efeitos)
+function tom(freq, quando, dur, tipo, vol, freqFim) {
+  const o = audio.createOscillator(), g = audio.createGain();
+  o.type = tipo;
+  o.frequency.setValueAtTime(freq, quando);
+  if (freqFim) o.frequency.exponentialRampToValueAtTime(freqFim, quando + dur);
+  g.gain.setValueAtTime(0.0001, quando);
+  g.gain.linearRampToValueAtTime(vol, quando + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, quando + dur);
+  o.connect(g); g.connect(mestre);
+  o.start(quando); o.stop(quando + dur + 0.05);
+}
+
+// efeitos sonoros do jogo
+function tocar(nome) {
+  if (!audio || !somLigado) return;
+  const t = audio.currentTime;
+  if (nome === 'pegar') {                         // pegou caixa: dois "plins" subindo
+    tom(660, t, 0.09, 'square', 0.12);
+    tom(990, t + 0.07, 0.12, 'square', 0.12);
+  } else if (nome === 'avariada') {               // pegou caixa vermelha: zumbido grave
+    tom(220, t, 0.35, 'sawtooth', 0.2, 60);
+    tom(110, t, 0.35, 'square', 0.15, 40);
+  } else if (nome === 'caiu') {                   // caixa bateu no chão: pancada
+    tom(170, t, 0.3, 'sine', 0.4, 45);
+  } else if (nome === 'nivel') {                  // a cada 10 caixas: escadinha animada
+    [523, 659, 784, 1047].forEach((f, i) => tom(f, t + i * 0.08, 0.14, 'triangle', 0.2));
+  } else if (nome === 'fim') {                    // fim de jogo: notas descendo
+    [392, 330, 262, 196].forEach((f, i) => tom(f, t + i * 0.22, 0.3, 'sawtooth', 0.15));
+  } else if (nome === 'clique') {                 // botão
+    tom(800, t, 0.06, 'square', 0.1);
+  }
+}
+
+// música de fundo: um laço curto de 16 notas (0 = silêncio), números no padrão MIDI
+const NOTA_BAIXO   = [48,0,48,0,45,0,45,0,41,0,41,0,43,0,43,0];
+const NOTA_MELODIA = [72,0,76,0,79,0,76,0,77,0,72,0,74,0,67,0];
+const PASSO_MUSICA = 0.19;                        // segundos por nota
+let passoAtual = 0, proxNota = 0;
+function freqMidi(n) { return 440 * Math.pow(2, (n - 69) / 12); }
+
+// a cada 50 ms confere se precisa agendar as próximas notas
+setInterval(() => {
+  if (!audio || audio.state !== 'running') return;
+  if (estado === 'fim') { proxNota = 0; return; }   // sem música na tela de fim
+  if (proxNota < audio.currentTime) proxNota = audio.currentTime + 0.05;
+  while (proxNota < audio.currentTime + 0.25) {
+    const b = NOTA_BAIXO[passoAtual], m = NOTA_MELODIA[passoAtual];
+    if (b) tom(freqMidi(b), proxNota, PASSO_MUSICA * 1.6, 'square', 0.045);
+    if (m) tom(freqMidi(m), proxNota, PASSO_MUSICA * 1.8, 'triangle', 0.07);
+    passoAtual = (passoAtual + 1) % NOTA_BAIXO.length;
+    proxNota += PASSO_MUSICA;
+  }
+}, 50);
+
+// ===== Controles: teclado =====
+addEventListener('keydown', e => {
+  iniciarAudio();
+  if (e.key === 'm' || e.key === 'M') alternarSom();      // tecla M liga/desliga o som
+  teclas[e.key] = true;
+  if ((e.key === ' ' || e.key === 'Enter') && estado !== 'jogando') recomecar();
+  // na tela inicial: ↑ ↓ trocam o gênero, ← → trocam a cor da pele
+  if (estado === 'inicio') {
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') escolha.genero = escolha.genero === 'menino' ? 'menina' : 'menino';
+    if (e.key === 'ArrowLeft') escolha.pele = (escolha.pele + PELES.length - 1) % PELES.length;
+    if (e.key === 'ArrowRight') escolha.pele = (escolha.pele + 1) % PELES.length;
+  }
+  if (e.key.startsWith('Arrow') || e.key === ' ') e.preventDefault();
+});
+addEventListener('keyup', e => { teclas[e.key] = false; });
+
+// ===== Controles: toque (segurar lado esquerdo ou direito da tela) =====
+let toqueX = null;
+function posToque(ev) {
+  const r = tela.getBoundingClientRect();
+  return (ev.clientX - r.left) * (L / r.width);
+}
+function posToqueY(ev) {
+  const r = tela.getBoundingClientRect();
+  return (ev.clientY - r.top) * (A / r.height);
+}
+// confere se o ponto (px, py) está dentro de um retângulo
+function dentro(px, py, b) { return px >= b.x && px <= b.x + b.l && py >= b.y && py <= b.y + b.a; }
+
+addEventListener('pointerup', iniciarAudio);     // alguns celulares só liberam o som ao soltar o dedo
+tela.addEventListener('pointerdown', ev => {
+  iniciarAudio();
+  const px = posToque(ev), py = posToqueY(ev);
+  if (dentro(px, py, BOTAO_SOM)) { alternarSom(); return; }   // botão de som vale em qualquer tela
+  if (estado === 'inicio') {                     // cliques da tela de escolha
+    if (dentro(px, py, BOTAO_MENINO)) escolha.genero = 'menino';
+    if (dentro(px, py, BOTAO_MENINA)) escolha.genero = 'menina';
+    PELES.forEach((p, i) => { if (dentro(px, py, quadradoPele(i))) escolha.pele = i; });
+    if (dentro(px, py, BOTAO_JOGAR)) recomecar();
+    return;
+  }
+  if (estado === 'fim') { recomecar(); return; }
+  toqueX = px;
+});
+tela.addEventListener('pointermove', ev => { if (toqueX !== null) toqueX = posToque(ev); });
+addEventListener('pointerup', () => { toqueX = null; });
+addEventListener('pointercancel', () => { toqueX = null; });
+
+// ===== Cargas que caem =====
+function criarCarga() {
+  const ruim = Math.random() < 0.25;            // 1 em cada 4 é carga avariada
+  cargas.push({ x: 20 + Math.random() * (L - 60), y: -30, tam: 28, ruim });
+}
+
+// ===== Atualiza a lógica a cada quadro =====
+function atualizar() {
+  // move o Rafa
+  let andando = false;
+  if (teclas['ArrowLeft'] || teclas['a'] || (toqueX !== null && toqueX < rafa.x + 32)) {
+    rafa.x -= rafa.vel; rafa.olhandoEsquerda = true; andando = true;
+  }
+  if (teclas['ArrowRight'] || teclas['d'] || (toqueX !== null && toqueX > rafa.x + 32)) {
+    rafa.x += rafa.vel; rafa.olhandoEsquerda = false; andando = true;
+  }
+  rafa.x = Math.max(0, Math.min(L - 64, rafa.x));
+
+  // alterna os 2 quadros de andar
+  if (andando && ++rafa.passo % 8 === 0) rafa.quadro = 1 - rafa.quadro;
+  if (!andando) rafa.quadro = 0;
+
+  // cria novas cargas e aumenta a dificuldade aos poucos
+  if (--tempoNovaCarga <= 0) {
+    criarCarga();
+    tempoNovaCarga = Math.max(25, 70 - pontos);
+  }
+  velocidade = 2 + pontos * 0.05;
+
+  // move as cargas e confere se o Rafa pegou
+  for (let i = cargas.length - 1; i >= 0; i--) {
+    const c = cargas[i];
+    c.y += velocidade;
+    const pegou = c.y + c.tam > rafa.y + 10 && c.y < rafa.y + 40 &&
+                  c.x + c.tam > rafa.x + 12 && c.x < rafa.x + 52;
+    if (pegou) {
+      cargas.splice(i, 1);
+      if (c.ruim) perderVida(c.x, 'Avariada!');
+      else {
+        pontos++; avisos.push({ x: c.x, y: c.y, texto: '+1', cor: LIMAO, t: 40 });
+        tocar(pontos % 10 === 0 ? 'nivel' : 'pegar');   // a cada 10 caixas toca a escadinha
+      }
+    } else if (c.y > CHAO) {
+      cargas.splice(i, 1);
+      if (!c.ruim) perderVida(c.x, 'Caiu!');
+    }
+  }
+
+  // efeitos visuais
+  if (tremor > 0) tremor--;
+  if (rafa.piscar > 0) rafa.piscar--;
+  avisos.forEach(a => { a.y -= 1; a.t--; });
+  avisos = avisos.filter(a => a.t > 0);
+}
+
+function perderVida(x, texto) {
+  vidas--; tremor = 15; rafa.piscar = 40;
+  avisos.push({ x, y: CHAO - 80, texto, cor: '#ff4d4d', t: 50 });
+  if (vidas <= 0) { estado = 'fim'; tocar('fim'); }
+  else tocar(texto === 'Avariada!' ? 'avariada' : 'caiu');
+}
+
+// ===== Cenário: armazém à noite =====
+function desenharFundo() {
+  ctx.fillStyle = '#16223d'; ctx.fillRect(0, 0, L, A);          // parede
+  // prateleiras com caixas paradas
+  for (let p = 0; p < 3; p++) {
+    const py = 150 + p * 110;
+    ctx.fillStyle = '#2b3b63'; ctx.fillRect(0, py, L, 8);
+    for (let i = 0; i < 9; i++) {
+      ctx.fillStyle = (i + p) % 3 ? '#5a4632' : '#6b5238';
+      ctx.fillRect(10 + i * 44, py - 30, 34, 30);
+    }
+  }
+  // luzes do teto
+  for (let i = 0; i < 4; i++) {
+    ctx.fillStyle = '#ffe9a8'; ctx.fillRect(40 + i * 100, 40, 40, 6);
+  }
+}
+
+function desenharChao() {
+  ctx.fillStyle = '#3a4250'; ctx.fillRect(0, CHAO, L, A - CHAO);
+  // faixa de segurança amarela e preta
+  for (let i = 0; i < L; i += 30) {
+    ctx.fillStyle = LIMAO; ctx.fillRect(i, CHAO, 15, 8);
+    ctx.fillStyle = '#111'; ctx.fillRect(i + 15, CHAO, 15, 8);
+  }
+}
+
+function desenharCarga(c) {
+  if (c.ruim) {
+    ctx.fillStyle = '#8b2b2b'; ctx.fillRect(c.x, c.y, c.tam, c.tam);
+    ctx.strokeStyle = '#ffdddd'; ctx.lineWidth = 3;   // X de avariada
+    ctx.beginPath();
+    ctx.moveTo(c.x + 6, c.y + 6); ctx.lineTo(c.x + c.tam - 6, c.y + c.tam - 6);
+    ctx.moveTo(c.x + c.tam - 6, c.y + 6); ctx.lineTo(c.x + 6, c.y + c.tam - 6);
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = '#c8955a'; ctx.fillRect(c.x, c.y, c.tam, c.tam);
+    ctx.fillStyle = '#9c6d3a'; ctx.fillRect(c.x + c.tam / 2 - 3, c.y, 6, c.tam);  // fita
+  }
+}
+
+function desenharPainel() {
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, 0, L, 34);
+  ctx.font = 'bold 18px monospace'; ctx.textAlign = 'left';
+  ctx.fillStyle = '#fff'; ctx.fillText('Pontos: ' + pontos, 10, 23);
+  ctx.textAlign = 'right'; ctx.fillStyle = LARANJA;
+  ctx.fillText('Vidas: ' + '♥'.repeat(Math.max(0, vidas)), L - 10, 23);
+}
+
+function textoCentro(t, y, tam, cor) {
+  ctx.font = 'bold ' + tam + 'px monospace'; ctx.textAlign = 'center';
+  ctx.fillStyle = cor; ctx.fillText(t, L / 2, y);
+}
+
+// botão Recomeçar / Jogar desenhado no canvas
+function desenharBotao(t) {
+  ctx.fillStyle = LARANJA; ctx.fillRect(L / 2 - 90, 380, 180, 50);
+  textoCentro(t, 413, 22, '#111');
+}
+
+// ===== Tela de escolha do personagem =====
+const BOTAO_MENINO = { x: 60, y: 330, l: 130, a: 40 };
+const BOTAO_MENINA = { x: 210, y: 330, l: 130, a: 40 };
+const BOTAO_JOGAR = { x: 110, y: 480, l: 180, a: 50 };
+function quadradoPele(i) { return { x: 65 + i * 56, y: 410, l: 44, a: 44 }; }
+
+function desenharEscolha() {
+  ctx.fillStyle = 'rgba(13,21,38,0.85)'; ctx.fillRect(20, 40, L - 40, 510);   // painel
+  textoCentro('PEGA-CARGA', 95, 40, LARANJA);
+  textoCentro('Monte seu personagem', 125, 16, '#fff');
+  // prévia grande do personagem (pixels 4x4)
+  rafa.olhandoEsquerda = false;
+  desenharPersonagem(L / 2 - 64, 165, 4);
+  // botões de gênero (o escolhido fica laranja)
+  textoCentro('Gênero  (↑ ↓)', 320, 14, LIMAO);
+  [[BOTAO_MENINO, 'MENINO', 'menino'], [BOTAO_MENINA, 'MENINA', 'menina']].forEach(([b, t, g]) => {
+    ctx.fillStyle = escolha.genero === g ? LARANJA : '#2b3b63';
+    ctx.fillRect(b.x, b.y, b.l, b.a);
+    ctx.font = 'bold 18px monospace'; ctx.textAlign = 'center';
+    ctx.fillStyle = escolha.genero === g ? '#111' : '#fff';
+    ctx.fillText(t, b.x + b.l / 2, b.y + 27);
+  });
+  // quadrados com os tons de pele (o escolhido tem borda limão)
+  textoCentro('Cor da pele  (← →)', 400, 14, LIMAO);
+  PELES.forEach((p, i) => {
+    const q = quadradoPele(i);
+    if (escolha.pele === i) { ctx.fillStyle = LIMAO; ctx.fillRect(q.x - 4, q.y - 4, q.l + 8, q.a + 8); }
+    ctx.fillStyle = p.S; ctx.fillRect(q.x, q.y, q.l, q.a);
+  });
+  // botão jogar
+  ctx.fillStyle = LARANJA; ctx.fillRect(BOTAO_JOGAR.x, BOTAO_JOGAR.y, BOTAO_JOGAR.l, BOTAO_JOGAR.a);
+  textoCentro('JOGAR', BOTAO_JOGAR.y + 33, 22, '#111');
+  textoCentro('Pegue as caixas, fuja das vermelhas!', 545, 13, '#fff');
+}
+
+// ===== Desenha tudo =====
+function desenhar() {
+  ctx.save();
+  if (tremor > 0) ctx.translate((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 8);
+  desenharFundo();
+  desenharChao();
+
+  if (estado === 'inicio') {
+    desenharEscolha();
+  } else {
+    cargas.forEach(desenharCarga);
+    // Rafa pisca depois de perder vida
+    if (rafa.piscar % 8 < 5) desenharPersonagem(rafa.x, rafa.y);
+    avisos.forEach(a => {
+      ctx.font = 'bold 18px monospace'; ctx.textAlign = 'left';
+      ctx.fillStyle = a.cor; ctx.fillText(a.texto, a.x, a.y);
+    });
+    desenharPainel();
+    if (estado === 'fim') {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, 0, L, A);
+      textoCentro('FIM DE TURNO', 260, 36, LARANJA);
+      textoCentro('Você pegou ' + pontos + ' caixas', 310, 18, '#fff');
+      desenharBotao('RECOMEÇAR');
+    }
+  }
+  ctx.restore();
+  desenharBotaoSom();
+}
+
+// botão de som no topo: nota musical, com risco vermelho quando está mudo
+function desenharBotaoSom() {
+  const b = BOTAO_SOM;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(b.x, b.y, b.l, b.a);
+  ctx.font = 'bold 20px monospace'; ctx.textAlign = 'center';
+  ctx.fillStyle = somLigado ? LIMAO : '#888';
+  ctx.fillText('♪', b.x + b.l / 2, b.y + 21);
+  if (!somLigado) {
+    ctx.strokeStyle = '#ff4d4d'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(b.x + 8, b.y + b.a - 5); ctx.lineTo(b.x + b.l - 8, b.y + 5); ctx.stroke();
+  }
+}
+
+// ===== Laço principal =====
+function laco() {
+  if (estado === 'jogando') atualizar();
+  desenhar();
+  requestAnimationFrame(laco);
+}
+laco();
+</script>
+</body>
+</html>
